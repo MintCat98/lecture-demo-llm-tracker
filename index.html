@@ -136,6 +136,7 @@
     <div class="brand">
       <h1>Update Tracker</h1>
       <p class="last" id="last"></p>
+      <p class="last" id="ai-diag" role="status"></p>
     </div>
     <div class="kw-wrap">
       <label for="kw" class="sr">키워드 추가</label>
@@ -146,54 +147,59 @@
 </main>
 <div id="dialog-root"></div>
 
+<!-- 번역(한↔영)과 on-device LLM 준비·진단. 아래 메인 스크립트보다 먼저 불러와야 해요 -->
+<script src="js/translator-ko.js"></script>
+<script src="js/ai.js"></script>
 <script>
 /* ──────────────────────────────────────────────────────────
- * 더미 데이터
- * 실제로 연결할 때는 DEALS를 fetch('data.json') 결과로 바꾸면 돼요.
- * 형식: { kw, src: '뽐뿌'|'뉴스', title, url, start: 'MM.DD', end: 'MM.DD'|null, similar?: [{title, url}] }
- * off: true 는 LLM 판단을 흉내 내기 위한 더미 표시예요 (관심사와 안 맞는 글).
+ * 데이터: data/data.json (수집 결과)을 읽어서 키워드별 카드로 바꿔요.
+ * data.json 형식: { updated, items: [{ id, source: '뽐뿌'|'뉴스', title, shop, price, link, published }] }
+ * 1차 거르기: 키워드가 제목에 들어 있는 글만 그 키워드 칸에 넣어요 (띄어쓰기·대소문자 무시)
+ * 2차 거르기: "관심사에 맞는 글만 보기"를 누르면 AI가 판단해요 (아래 LLM 판단)
  * ────────────────────────────────────────────────────────── */
 const DEFAULT_KEYWORDS = ['청소기','에어팟','닌텐도 스위치','캠핑의자','원두','모니터','러닝화','기계식 키보드','공기청정기','레고','아이패드','전기요','가습기','블루투스 스피커','로봇청소기','커피머신','캐리어','다이슨','보조배터리','텀블러','노트북','패딩','안마의자','전기밥솥','건조기','와인','생수','물티슈'];
 
-const PPOMPPU = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=ppomppu';
-const news = (q) => 'https://news.google.com/search?q=' + encodeURIComponent(q) + '&hl=ko&gl=KR&ceid=KR:ko';
+const DATA_URL = 'data/data.json';
+let ITEMS = [];            // data.json의 items 그대로
+let DATA_UPDATED = null;   // data.json의 updated (마지막 수집 시각)
+let dataError = null;
 
-const DEALS = [
-  { kw:'청소기', src:'뽐뿌', title:'[11번가] 삼성 비스포크 제트 AI 무선청소기 블프 특가', start:'11.25', end:'11.28' },
-  { kw:'청소기', src:'뉴스', title:'해외 직구로 다이슨 청소기 사면 얼마나 아낄까…블프 직구 가이드', start:'11.24', end:null,
-    similar:['블프 해외 직구 앞두고 청소기 인기 모델 총정리','“해외에서 사면 반값”…청소기 직구 수요 늘었다'] },
-  { kw:'청소기', src:'뉴스', title:'블랙프라이데이 해외 직구 청소기, 관부가세 기준부터 확인해야', start:'11.25', end:null },
-  { kw:'청소기', src:'뽐뿌', title:'[알리] 해외직구 드리미 무선청소기 쿠폰 적용가', start:'11.26', end:'12.01' },
-  { kw:'청소기', src:'뉴스', title:'청소기 업계, 연말 매출 경쟁 본격화', start:'11.23', end:null, off:true },
-  { kw:'청소기', src:'뽐뿌', title:'[쿠팡] LG 코드제로 A9S 무선청소기 카드 즉시할인', start:'11.26', end:'11.27' },
-  { kw:'에어팟', src:'뽐뿌', title:'[쿠팡] 애플 에어팟 프로 2 USB-C 와우회원 할인', start:'11.26', end:'11.29' },
-  { kw:'에어팟', src:'뽐뿌', title:'[G마켓] 에어팟 4 액티브 노이즈 캔슬링 빅스마일데이', start:'11.25', end:'11.30' },
-  { kw:'에어팟', src:'뽐뿌', title:'[스마트스토어] 에어팟 실리콘 케이스 2+1', start:'11.24', end:'11.30', off:true },
-  { kw:'에어팟', src:'뉴스', title:'애플, 블랙프라이데이 기프트카드 증정 행사 시작', start:'11.27', end:'11.30',
-    similar:['애플 블프 행사 시작…에어팟 구매 시 기프트카드','올해 애플 블랙프라이데이, 대상 제품은?','애플 쇼핑 이벤트 국내도 진행'] },
-  { kw:'닌텐도 스위치', src:'뽐뿌', title:'[이마트] 닌텐도 스위치 2 마리오카트 월드 세트 재입고', start:'11.26', end:null },
-  { kw:'닌텐도 스위치', src:'뉴스', title:'닌텐도, 연말 e숍 세일…인기 타이틀 최대 75% 할인', start:'11.20', end:'12.10',
-    similar:['닌텐도 e숍 연말 세일 시작','스위치 게임 연말 할인 목록 공개'] },
-  { kw:'닌텐도 스위치', src:'뽐뿌', title:'[11번가] 닌텐도 스위치 OLED 리퍼 특가', start:'11.24', end:'11.27' },
-  { kw:'캠핑의자', src:'뽐뿌', title:'[무신사] 헬리녹스 체어원 시즌오프', start:'11.25', end:'12.02' },
-  { kw:'캠핑의자', src:'뉴스', title:'캠핑 비수기 맞은 아웃도어 업계, 재고 정리 나서', start:'11.22', end:null, off:true },
-  { kw:'원두', src:'뽐뿌', title:'[스마트스토어] 스페셜티 원두 1kg 첫 구매 할인', start:'11.26', end:'11.30' },
-  { kw:'원두', src:'뽐뿌', title:'[쿠팡] 스타벅스 홀빈 1.13kg 로켓배송 할인', start:'11.25', end:'11.28' },
-  { kw:'모니터', src:'뽐뿌', title:'[아마존] LG 27인치 4K 모니터 블프 최저가', start:'11.26', end:'11.28' },
-  { kw:'모니터', src:'뉴스', title:'모니터 패널 가격 3개월 연속 하락', start:'11.21', end:null, off:true },
-  { kw:'모니터', src:'뉴스', title:'글로벌 모니터 출하량, 전년보다 늘어', start:'11.19', end:null, off:true },
-  { kw:'러닝화', src:'뽐뿌', title:'[나이키] 페가수스 41 회원 추가 20% 할인', start:'11.27', end:'12.01' },
-  { kw:'기계식 키보드', src:'뽐뿌', title:'[쿠팡] 레오폴드 FC900R 블프 특가', start:'11.26', end:'11.29' },
-  { kw:'공기청정기', src:'뉴스', title:'공기청정기 렌탈 업계, 겨울 프로모션 경쟁', start:'11.24', end:null, off:true },
-  { kw:'공기청정기', src:'뽐뿌', title:'[하이마트] 삼성 블루스카이 5500 카드 청구할인', start:'11.26', end:'11.30' },
-  { kw:'레고', src:'뽐뿌', title:'[레고샵] 블랙프라이데이 구매 사은품 증정', start:'11.27', end:'11.30' },
-  { kw:'아이패드', src:'뉴스', title:'아이패드 에어 블프 할인, 국내 쇼핑몰도 동참', start:'11.26', end:'11.30' }
-].map((d, i) => ({
-  ...d,
-  id: 'd' + i,
-  url: d.src === '뽐뿌' ? PPOMPPU : news(d.kw),
-  similar: (d.similar || []).map((t) => ({ title: t, url: news(d.kw) }))
-}));
+const norm = (s) => String(s).toLowerCase().replace(/\s+/g, '');
+const mmdd = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getMonth() + 1}.${String(d.getDate()).padStart(2, '0')}`; };
+
+// 키워드 × 글 → 카드 목록. 같은 글이 여러 키워드에 걸리면 키워드마다 카드가 생겨요 (id = 글id|키워드)
+let dealsMemo = { key: null, list: [] };
+function allDeals() {
+  const key = state.keywords.join('\u0001') + '|' + ITEMS.length;
+  if (dealsMemo.key === key) return dealsMemo.list;
+  const list = [];
+  for (const kw of state.keywords) {
+    for (const it of ITEMS) {
+      if (!norm(it.title).includes(norm(kw))) continue;
+      list.push({
+        id: it.id + '|' + kw, kw, src: it.source, title: it.title, url: it.link,
+        start: mmdd(it.published), end: null, ts: it.published || '', similar: []
+      });
+    }
+  }
+  dealsMemo = { key, list };
+  return list;
+}
+
+async function loadData() {
+  try {
+    const res = await fetch(DATA_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const data = await res.json();
+    ITEMS = Array.isArray(data.items) ? data.items : [];
+    DATA_UPDATED = data.updated || null;
+    dataError = null;
+  } catch (e) {
+    dataError = e.message;
+  }
+  updateLast();
+  render();
+}
 
 /* 키워드 개선 에이전트 제안 (더미). canApply:false 는 repo 설정을 바꿔야 하는 제안이에요. */
 const SUGGESTIONS = [
@@ -204,9 +210,8 @@ const SUGGESTIONS = [
     evidence:['모니터 패널 가격 3개월 연속 하락','글로벌 모니터 출하량, 전년보다 늘어'] }
 ];
 
-/* 실제로 연결할 때는 'LanguageModel' in self 로 바꾸면 돼요. */
-const LLM_SUPPORTED = true;
-const LAST_COLLECTED_MIN = 5;
+/* Prompt API(ai.js)와 Translator API(translator-ko.js)가 둘 다 있어야 판단할 수 있어요. */
+const LLM_SUPPORTED = AI.isSupported() && KoTranslate.isSupported();
 const STORE_KEY = 'update-tracker:v1';
 
 /* ────────────────────────── 상태 ────────────────────────── */
@@ -217,15 +222,15 @@ const state = {
   kwSort: saved.kwSort || 'manual',                            // manual | asc | desc
   dealSort: saved.dealSort || 'end',                           // end | start
   expanded: !!saved.expanded,                                  // 태그 박스 펼침
-  llmCache: saved.llmCache || {},                              // { dealId: true(맞음) | false(안 맞음) }
+  aiCache: saved.aiCache || {},                              // { dealId: true(맞음) | false(안 맞음) }
   excludes: saved.excludes || {},                              // { 키워드: [제외어] }
   dismissed: saved.dismissed || [],                            // 닫은 제안 id
   // 저장하지 않는 상태
   llm: 'idle', judged: 0, reapplying: false, dialog: null, flash: null, open: {}, drag: null
 };
 function persist() {
-  const { keywords, selected, kwSort, dealSort, expanded, llmCache, excludes, dismissed } = state;
-  try { localStorage.setItem(STORE_KEY, JSON.stringify({ keywords, selected, kwSort, dealSort, expanded, llmCache, excludes, dismissed })); } catch (e) {}
+  const { keywords, selected, kwSort, dealSort, expanded, aiCache, excludes, dismissed } = state;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify({ keywords, selected, kwSort, dealSort, expanded, aiCache, excludes, dismissed })); } catch (e) {}
 }
 function set(patch) { Object.assign(state, patch); persist(); render(); }
 
@@ -248,11 +253,12 @@ function sortedKeywords() {
   return list;
 }
 function isExcluded(d) { return (state.excludes[d.kw] || []).some((w) => d.title.includes(w)); }
-function isHiddenByLlm(d) { return state.llm !== 'idle' && state.llmCache[d.id] === false; }
+function isHiddenByLlm(d) { return state.llm !== 'idle' && state.aiCache[d.id] === false; }
 function dealsFor(kw) {
-  const items = DEALS.filter((d) => d.kw === kw && !isExcluded(d) && !isHiddenByLlm(d));
-  if (state.dealSort === 'end') items.sort((a, b) => (num(a.end) || 9999) - (num(b.end) || 9999));
-  else items.sort((a, b) => num(b.start) - num(a.start));
+  const items = allDeals().filter((d) => d.kw === kw && !isExcluded(d) && !isHiddenByLlm(d));
+  const newer = (a, b) => (b.ts || '').localeCompare(a.ts || '');   // 최신 글이 위로
+  if (state.dealSort === 'end') items.sort((a, b) => (num(a.end) || 9999) - (num(b.end) || 9999) || newer(a, b));
+  else items.sort(newer);
   return items;
 }
 function currentSuggestion() {
@@ -261,7 +267,10 @@ function currentSuggestion() {
     if (state.dismissed.includes(s.id)) continue;
     if (!state.keywords.includes(s.kw)) continue;
     if (s.word && (state.excludes[s.kw] || []).includes(s.word)) continue;
-    const evidence = s.evidence || DEALS.filter((d) => d.kw === s.kw && d.title.includes(s.word)).map((d) => d.title);
+    const evidence = s.evidence
+      ? s.evidence.filter((t) => allDeals().some((d) => d.title === t))
+      : allDeals().filter((d) => d.kw === s.kw && d.title.includes(s.word)).map((d) => d.title);
+    if (!evidence.length) continue;   // 실제 데이터에 근거가 없으면 제안하지 않아요
     return { ...s, evidence: evidence.slice(0, 3) };
   }
   return null;
@@ -270,7 +279,16 @@ function currentSuggestion() {
 /* ────────────────────────── 렌더 ────────────────────────── */
 const app = document.getElementById('app');
 const dialogRoot = document.getElementById('dialog-root');
-document.getElementById('last').textContent = '마지막 수집: ' + LAST_COLLECTED_MIN + '분 전';
+function updateLast() {
+  const el = document.getElementById('last');
+  if (dataError) { el.textContent = `데이터를 불러오지 못했어요 (${dataError}) · localhost 주소로 열었는지 확인해요`; return; }
+  if (!DATA_UPDATED) { el.textContent = '데이터 불러오는 중…'; return; }
+  const min = Math.round((Date.now() - new Date(DATA_UPDATED)) / 60000);
+  const d = new Date(DATA_UPDATED);
+  el.textContent = '마지막 수집: ' + (min < 1 ? '방금' : min < 60 ? `${min}분 전` : min < 1440 ? `${Math.floor(min / 60)}시간 전`
+    : `${mmdd(DATA_UPDATED)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+}
+updateLast();
 
 function renderTagBox() {
   if (!state.keywords.length) {
@@ -290,7 +308,7 @@ function renderTagBox() {
 
   let right = '';
   if (state.llm === 'judging') {
-    const total = DEALS.length;
+    const total = allDeals().length;
     right += `<div class="status" role="status"><span>새 소식 ${total}개를 살펴보고 있어요</span><div class="bar"><div style="width:${Math.round(state.judged / total * 100)}%"></div></div></div>`;
   } else if (state.reapplying) {
     right += `<div class="status" role="status"><span>다시 살펴보고 있어요</span></div>`;
@@ -429,21 +447,52 @@ function render() {
   renderDialog();
 }
 
-/* ────────────────────────── LLM (더미 판단) ────────────────────────── */
-let timer = null;
+/* ────────────────────────── LLM 판단 (ai.js + translator-ko.js) ────────────────────────── */
+const aiDiag = document.getElementById('ai-diag');
+const showAiStatus = (msg) => { aiDiag.textContent = msg; };
+let running = false;
 function runLlm() {
-  const pending = DEALS.filter((d) => !(d.id in state.llmCache));
+  if (running) return;
+  const pending = allDeals().filter((d) => !(d.id in state.aiCache));
   if (!pending.length) { set({ llm: 'on' }); return; }   // 이미 판단한 글은 캐시 사용
-  set({ llm: 'judging', judged: DEALS.length - pending.length });
-  let i = 0;
-  clearInterval(timer);
-  timer = setInterval(() => {
-    const d = pending[i++];
-    // 실제로는 여기서 Translator API → Prompt API 로 판단해요.
-    state.llmCache[d.id] = !d.off;
-    if (i >= pending.length) { clearInterval(timer); set({ llm: 'on', judged: DEALS.length }); }
-    else set({ judged: state.judged + 1 });
-  }, 120);
+  running = true;
+  // 모델 다운로드는 클릭 직후(사용자 활성화가 살아 있을 때)에만 시작돼요 → 어떤 await보다 먼저 호출
+  const ready = Promise.all([
+    AI.prepare((p) => showAiStatus(`언어 모델 다운로드 ${Math.round(p * 100)}%`)),
+    KoTranslate.prepare((p, key) => showAiStatus(`번역 모델(${key}) 다운로드 ${Math.round(p * 100)}%`)),
+  ]);
+  set({ llm: 'judging', judged: allDeals().length - pending.length });
+  judge(pending, ready);
+}
+
+async function judge(pending, ready) {
+  try {
+    await ready;
+    showAiStatus('모델 준비 완료 · 판단 중');
+    const interests = await KoTranslate.toEnglish(state.keywords.slice());   // 관심사(키워드)도 영어로
+    const session = await AI.createSession(await AI.loadPrompt('ai/prompt.md', { interests }));   // 판단 기준
+    const schema = await AI.loadSchema('ai/schema.json');                                              // 답 형식
+    for (const d of pending) {
+      try {
+        const [kw, title] = await KoTranslate.toEnglish([d.kw, d.title]);
+        const out = await AI.ask(session, `Keyword: ${kw}\nItem (${d.src === '뉴스' ? 'news headline' : 'deal post'}): ${title}`, schema);
+        state.aiCache[d.id] = !!out.relevant;
+      } catch (e) {
+        console.warn('판단 실패 (숨기지 않고 보여줘요):', d.title, e);
+        state.aiCache[d.id] = true;
+      }
+      set({ judged: state.judged + 1 });
+    }
+    session.destroy();
+    set({ llm: 'on', judged: allDeals().length });
+    AI.showDiagnosis(aiDiag);
+  } catch (e) {
+    console.error(e);
+    set({ llm: 'idle' });
+    showAiStatus('AI 준비 실패: ' + e.message);
+  } finally {
+    running = false;
+  }
 }
 
 /* ────────────────────────── 이벤트 ────────────────────────── */
@@ -529,6 +578,8 @@ window.addEventListener('resize', () => { updateArrows(); updateMore(); });
 document.fonts && document.fonts.ready.then(() => { updateArrows(); updateMore(); });
 
 render();
+loadData();
+AI.showDiagnosis(aiDiag);
 </script>
 </body>
 </html>
