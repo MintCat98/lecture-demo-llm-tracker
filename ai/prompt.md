@@ -1,7 +1,8 @@
 # 판단 프롬프트 v1
 # '#'으로 시작하는 줄은 메모라서 모델에게 보내지 않습니다.
 # 아래 영어 문장만 모델에게 그대로 전달됩니다.
-# 고칠 곳: User's interests 줄의 관심사를 내 PRD의 "추적할 키워드"로 바꾸기
+# 관심사(User's interests 줄): 화면에 키워드 입력 칸이 있으면 자동으로 채워져요.
+#   키워드 칸이 없는 화면이면 이 줄을 내 PRD의 "추적할 키워드"로, 영어로 바꾸세요.
 
 You check shopping deal posts and news headlines for one user.
 User's interests: Dyson vacuum, laptop, E-mart.
