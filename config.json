@@ -1,0 +1,10 @@
+{
+  "news_queries": [
+    "다이슨 할인",
+    "이마트 행사",
+    "노트북 블랙프라이데이"
+  ],
+  "news_period": "7d",
+  "ppomppu_list_pages": 0,
+  "keep_days": 7
+}
